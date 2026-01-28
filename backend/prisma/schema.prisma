@@ -1,0 +1,728 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Users (Clients/Customers)
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String
+  phone         String?
+  cpf           String?   @unique
+  dateOfBirth   DateTime?
+  address       String?
+  city          String?
+  state         String?
+  postalCode    String?
+  profilePhoto  String?
+  
+  // 📝 Descrição e Informações
+  description   String?   @db.Text  // Descrição do cliente/empresa
+  companyName   String?              // Nome da empresa (se for empresa)
+  isCompany     Boolean   @default(false)
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  bookings      Booking[]
+  reviews       Review[]
+  userRatings   UserRating[]
+  notifications Notification[]
+  disputes      Dispute[]
+  regionPrefs   RegionPreference[]
+  achievements  UserAchievement[]
+
+  @@index([email])
+  @@index([city])
+}
+
+// Cleaners (Faxineiras)
+model Cleaner {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String
+  phone         String
+  cpf           String    @unique
+  dateOfBirth   DateTime
+  age           Int
+  region        String
+  bio           String?
+  photo         String?
+  
+  // 📝 Descrição Detalhada
+  description   String?   @db.Text  // Descrição completa do limpador
+  specialties   String[]              // ["limpeza profunda", "apartamentos", "casarões"]
+  experience    Int?                  // Anos de experiência
+  languages     String[]              // ["português", "espanhol"]
+  
+  nationalId    String?   // For identity verification
+  bankAccount   String?   // For payouts
+  
+  // Rating info
+  averageRating Float     @default(0)
+  reviewCount   Int       @default(0)
+  totalBookings Int       @default(0)
+  
+  // 🏆 Bônus e Agilidade
+  consecutiveFiveStars Int @default(0)    // Contador de 5 estrelas seguidas
+  topCleanerBadge Boolean @default(false) // Badge TOP CLEANER ativo
+  topCleanerUntil DateTime?               // Data até quando mantém badge (30 dias)
+  totalBonusEarned Float @default(0)      // Total de bônus ganho
+  lastBonusDate DateTime?                 // Data do último bônus
+  
+  // ⏰ Agilidade Mensal
+  currentMonthCalls Int @default(0)       // Chamadas este mês
+  currentMonthAcceptance Float @default(0) // Taxa de aceitação
+  agilityScore Float @default(0)          // Score de agilidade (0-10)
+  
+  // 🏆 Ranking e Reputação
+  reputationPoints Int @default(100)      // Começa com 100 pontos
+  currentRank      Int?                    // Posição no ranking
+  
+  // Status
+  status        String    @default("active") // active, inactive, suspended, verified
+  verified      Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  bookings      Booking[]
+  reviews       Review[]
+  userRatings   UserRating[]
+  schedules     CleanerSchedule[]
+  weekSchedules CleanerWeekDay[]
+  availability  CleanerAvailability[]
+  bankDetails   BankDetail?
+  documents     Document[]
+  notifications Notification[]
+  disputes      Dispute[]
+  bonuses       CleanerBonus[]
+  metrics       CleanerMetrics[]
+  punishments   CleanerPunishment[]
+  achievements  CleanerAchievement[]
+  serviceDescriptions ServiceDescription[]
+
+  @@index([region])
+  @@index([email])
+  @@index([status])
+  @@index([topCleanerBadge])
+  @@index([reputationPoints])
+  @@index([currentRank])
+}
+
+// Cleaner Schedule - Agenda Principal (Turnos Fixos ou Flexível)
+model CleanerSchedule {
+  id        String   @id @default(cuid())
+  cleanerId String   @unique
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  // Tipo de agenda
+  scheduleType String @default("fixed") // "fixed" (turnos) ou "flexible" (dia a dia)
+  
+  // Configurações
+  timeSlotDuration Int @default(120)    // minutos para cada agendamento (ex: 120 = 2h)
+  minBookingInAdvance Int @default(24)  // horas antes que pode agendar
+  maxBookingsPerDay Int @default(5)     // máximo agendamentos por dia
+  
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  weekDays CleanerWeekDay[]
+
+  @@index([cleanerId])
+  @@index([scheduleType])
+}
+
+// Cleaner Week Day - Dias da semana (Para turnos fixos)
+model CleanerWeekDay {
+  id        String   @id @default(cuid())
+  scheduleId String
+  schedule  CleanerSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  cleanerId String
+  cleaner   Cleaner   @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  dayOfWeek Int      // 0=DOM, 1=SEG, 2=TER, 3=QUA, 4=QUI, 5=SEX, 6=SAB
+  isWorking Boolean  @default(false)
+  
+  timeSlots CleanerTimeSlot[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scheduleId, dayOfWeek])
+  @@index([cleanerId])
+}
+
+// Cleaner Time Slot - Horários específicos de cada dia
+model CleanerTimeSlot {
+  id        String   @id @default(cuid())
+  weekDayId String
+  weekDay   CleanerWeekDay @relation(fields: [weekDayId], references: [id], onDelete: Cascade)
+  
+  startTime String   // "08:00"
+  endTime   String   // "12:00"
+  
+  createdAt DateTime @default(now())
+
+  @@index([weekDayId])
+}
+
+// Cleaner Availability - Disponibilidade Flexível (Para agenda dia a dia)
+model CleanerAvailability {
+  id        String   @id @default(cuid())
+  cleanerId String
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  date      String   // "2026-02-15"
+  startTime String   // "08:00"
+  endTime   String   // "18:00"
+  
+  isBlocked Boolean  @default(false)  // true = bloqueado (férias, doença, etc)
+  reason    String?                   // "férias", "doença", "manutenção"
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cleanerId, date])
+  @@index([cleanerId])
+  @@index([date])
+}
+
+// Bookings/Agendamentos
+model Booking {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  cleanerId    String
+  cleaner      Cleaner  @relation(fields: [cleanerId], references: [id])
+  
+  // Booking details
+  date         DateTime
+  startTime    String
+  endTime      String
+  address      String
+  city         String
+  latitude     Float?
+  longitude    Float?
+  serviceType  String   // standard, deep-clean, etc
+  notes        String?
+  serviceDescription String? @db.Text // descrição detalhada do serviço
+  duration     Int      // in minutes
+  
+  // Pricing
+  estimatedPrice Float
+  finalPrice     Float?
+  
+  // Status
+  status       String   @default("confirmed") // pending, confirmed, completed, cancelled, no-show
+  paymentStatus String  @default("pending")   // pending, completed, refunded
+  cancellationReason String?
+  cancelledAt  DateTime?
+  completedAt  DateTime?
+  
+  // Relations
+  payment      Payment?
+  review       Review?
+  userRating   UserRating?
+  dispute      Dispute?
+  history      BookingHistory[]
+  reschedules  BookingReschedule[]
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([cleanerId])
+  @@index([date])
+  @@index([status])
+}
+
+// Booking History (for tracking changes)
+model BookingHistory {
+  id        String   @id @default(cuid())
+  bookingId String
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  action    String   // created, updated, cancelled, completed
+  details   String   // JSON string with changed fields
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+// Payments
+model Payment {
+  id            String   @id @default(cuid())
+  bookingId     String   @unique
+  booking       Booking  @relation(fields: [bookingId], references: [id])
+  
+  // Payment details
+  amount        Float
+  method        String   // card, pix, boleto
+  paymentGateway String // stripe, mercadopago
+  transactionId String   @unique
+  
+  // Stripe/MercadoPago details
+  stripePaymentIntentId String?
+  mercadopagoPaymentId  String?
+  
+  status        String   @default("pending") // pending, completed, failed, refunded
+  receiptUrl    String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  refundedAt    DateTime?
+
+  @@index([bookingId])
+  @@index([status])
+}
+
+// Reviews/Ratings
+model Review {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  cleanerId String
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id])
+  bookingId String    @unique
+  booking   Booking   @relation(fields: [bookingId], references: [id])
+  
+  rating    Int      // 1-5
+  comment   String?
+  
+  // Additional ratings
+  punctuality Int?   // 1-5
+  professionalism Int? // 1-5
+  quality     Int?   // 1-5
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cleanerId])
+  @@index([userId])
+}
+
+// Notifications
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  cleanerId String?
+  cleaner   Cleaner? @relation(fields: [cleanerId], references: [id], onDelete: SetNull)
+  
+  title     String
+  message   String
+  type      String   // booking_confirmed, payment_received, review_received, etc
+  read      Boolean  @default(false)
+  
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([cleanerId])
+  @@index([read])
+}
+
+// Discounts/Coupons
+model Discount {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  description String?
+  
+  discountType String // percentage, fixed
+  discountValue Float
+  
+  minBookingAmount Float?
+  maxUses       Int?
+  currentUses   Int    @default(0)
+  
+  validFrom    DateTime
+  validUntil   DateTime
+  
+  active       Boolean @default(true)
+  createdAt    DateTime @default(now())
+
+  @@index([code])
+  @@index([validFrom])
+}
+
+// Disputes
+model Dispute {
+  id        String   @id @default(cuid())
+  bookingId String   @unique
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  cleanerId String
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id])
+  
+  reason    String
+  description String?
+  evidence  String[] // URLs to photos/videos
+  
+  status    String   @default("open") // open, investigating, resolved, closed
+  resolution String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  resolvedAt DateTime?
+
+  @@index([status])
+  @@index([userId])
+  @@index([cleanerId])
+}
+
+// Bank Details for Payouts
+model BankDetail {
+  id        String   @id @default(cuid())
+  cleanerId String   @unique
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id])
+  
+  // Dados Bancários
+  bankCode  String?          // Ex: 001 (BB), 033 (Santander), 237 (Bradesco)
+  bankName  String?
+  accountType String?        // corrente, poupança
+  accountNumber String?      // Número da conta
+  accountDigit  String?      // Dígito verificador
+  accountHolderName String?  // Nome do titular
+  
+  // PIX
+  pixKey    String?          // Chave PIX (email, cpf, phone, random)
+  pixKeyType String?         // email, cpf, phone, random
+  
+  // Preço por Hora
+  hourlyRate Float @default(75.00) // R$ 75,00 padrão
+  
+  // Dados para Transferências
+  preferredPaymentMethod String @default("pix") // pix, bankTransfer, both
+  
+  // Status
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Documents (for cleaner verification)
+model Document {
+  id        String   @id @default(cuid())
+  cleanerId String
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  type      String   // id, proof_of_address, certification
+  url       String
+  verified  Boolean  @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cleanerId])
+}
+
+// Cleaner Bonus - Bônus por Performance
+model CleanerBonus {
+  id        String   @id @default(cuid())
+  cleanerId String
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  // Valor e motivo
+  amount    Float    // R$ 100,00 geralmente
+  reason    String   // "10_consecutive_five_stars", "milestone_100_bookings", etc
+  
+  // Status de transferência
+  status    String   @default("pending") // pending, transferred, failed
+  transferredAt DateTime?
+  failureReason String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cleanerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Cleaner Metrics - Métricas de Desempenho Mensal
+model CleanerMetrics {
+  id        String   @id @default(cuid())
+  cleanerId String
+  cleaner   Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  // Período
+  year      Int      // 2026
+  month     Int      // 1-12
+  
+  // Chamadas/Convites
+  totalCalls Int @default(0)              // Total de chamadas/convites
+  acceptedCalls Int @default(0)           // Quantas aceitou
+  rejectedCalls Int @default(0)           // Quantas rejeitou
+  acceptanceRate Float @default(0)        // % (ex: 93.5)
+  
+  // Resposta
+  avgResponseTime Int @default(0)         // segundos (ex: 120 = 2min)
+  
+  // Conclusão
+  completedJobs Int @default(0)
+  cancelledJobs Int @default(0)
+  noShowJobs Int @default(0)
+  completionRate Float @default(0)        // % (ex: 100)
+  
+  // Avaliações
+  avgRating Float @default(0)             // ex: 4.9
+  totalReviewsReceived Int @default(0)
+  fiveStarReviews Int @default(0)
+  
+  // Score Final
+  agilityScore Float @default(0)          // 0-10
+  topPercentile Boolean @default(false)   // Top 5%?
+  ranking Int?                             // Posição no ranking
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cleanerId, year, month])
+  @@index([cleanerId])
+  @@index([year, month])
+  @@index([agilityScore])
+  @@index([topPercentile])
+}
+
+// Booking Reschedule - Histórico de Reagendamentos
+model BookingReschedule {
+  id              String   @id @default(cuid())
+  bookingId       String
+  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  
+  originalDate    DateTime
+  originalStartTime String
+  originalEndTime String
+  
+  newDate         DateTime
+  newStartTime    String
+  newEndTime      String
+  
+  reason          String?  // motivo do reagendamento
+  initiatedBy     String   // "user" ou "cleaner"
+  
+  createdAt       DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([createdAt])
+}
+
+// User Rating - Avaliações mútuas entre usuário e limpador
+model UserRating {
+  id              String   @id @default(cuid())
+  
+  // Remetente da avaliação
+  givenByUserId   String?  // null se foi cleaner que avaliou
+  givenByCleanerId String? // null se foi user que avaliou
+  
+  // Receptor da avaliação
+  toUserId        String?  // null se avaliação é para cleaner
+  toCleanerId     String?  // null se avaliação é para user
+  
+  bookingId       String   @unique
+  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  
+  // Avaliação
+  rating          Int      // 1-5
+  comment         String?  @db.Text
+  
+  // Aspectos específicos
+  punctuality     Int?     // 1-5
+  professionalism Int?     // 1-5
+  quality         Int?     // 1-5
+  communication   Int?     // 1-5
+  
+  // Status
+  isPublic        Boolean  @default(true)
+  flagged         Boolean  @default(false)
+  flagReason      String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([toCleanerId])
+  @@index([toUserId])
+  @@index([givenByUserId])
+  @@index([givenByCleanerId])
+  @@index([flagged])
+}
+
+// Cleaner Punishment - Sistema de Punição (25 pontos + 2 dias bloqueio)
+model CleanerPunishment {
+  id              String   @id @default(cuid())
+  cleanerId       String
+  cleaner         Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  // Tipo de punição
+  type            String   // "no_show", "cancellation_both", "low_rating"
+  reason          String   // descrição detalhada
+  
+  // Pontos de reputação
+  pointsDeducted  Int      @default(25) // Padrão 25 pontos
+  
+  // Redução de pagamento para agência
+  paymentReduction Float   @default(25.0) // R$ 25 de redução no pagamento
+  
+  // Bloqueio de uso
+  isActive        Boolean  @default(true)
+  blockedUntil    DateTime? // data até quando está bloqueado
+  
+  // Origem da punição
+  relatedBookingId String?
+  relatedDisputeId String?
+  givenByAdmin    Boolean  @default(false)
+  adminId         String?
+  
+  // Razão específica
+  description     String?  @db.Text
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([cleanerId])
+  @@index([isActive])
+  @@index([blockedUntil])
+}
+
+// Region Preference - Preferências de região do usuário
+model RegionPreference {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Regiões preferidas (pode ter múltiplas)
+  regions         String[] // ex: ["Zona Sul", "Zona Oeste", "Centro"]
+  cities          String[] // ex: ["São Paulo", "Guarulhos"]
+  maxDistance     Int      @default(20) // km máximo de distância
+  
+  // Busca rápida
+  isQuickMode     Boolean  @default(false)
+  quickModeRegion String?  // região selecionada em modo rápido
+  
+  // Status
+  isDefault       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([isDefault])
+}
+
+// User Achievements - Conquistas dos Usuários
+model UserAchievement {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Tipo de conquista
+  type        String   // "first_booking", "100_bookings", "perfect_rating", "power_user", "trusted_user"
+  name        String   // "Primeiro Agendamento", "100 Agendamentos", etc
+  description String   @db.Text // descrição detalhada da conquista
+  icon        String?  // emoji ou URL do ícone
+  
+  // Badge de progresso
+  level       Int      @default(1) // 1=bronze, 2=silver, 3=gold
+  progress    Int      @default(0) // progresso até próximo nível (0-100)
+  
+  // Recompensas
+  bonusPoints Int      @default(0) // pontos bônus por ter a conquista
+  
+  unlockedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, type])
+  @@index([userId])
+  @@index([type])
+}
+
+// Cleaner Achievements - Conquistas dos Faxineiros
+model CleanerAchievement {
+  id          String   @id @default(cuid())
+  cleanerId   String
+  cleaner     Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  // Tipo de conquista
+  type        String   // "first_booking", "100_bookings", "5_star_rating", "top_performer", "master_cleaner"
+  name        String   // "Primeiro Agendamento", "100 Agendamentos", etc
+  description String   @db.Text // descrição detalhada
+  icon        String?  // emoji ou URL
+  
+  // Nível e Progresso
+  level       Int      @default(1) // 1=bronze, 2=silver, 3=gold
+  progress    Int      @default(0) // progresso (0-100)
+  
+  // Recompensas
+  bonusPoints Int      @default(0) // pontos extras
+  bonusEarnings Float  @default(0) // R$ extra ganho por ter conquista (1-5% por booking)
+  
+  // Motivo da conquista
+  awardedFor  String?  // qual métrica desbloqueou: "high_ratings", "completion_rate", "speed", "feedback"
+  awardedBy   String?  // "system" ou id do admin
+  
+  unlockedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([cleanerId, type])
+  @@index([cleanerId])
+  @@index([type])
+  @@index([level])
+}
+
+// Service Description - Descrição detalhada de serviços ofertados
+model ServiceDescription {
+  id          String   @id @default(cuid())
+  cleanerId   String
+  cleaner     Cleaner  @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  
+  // Tipo de serviço
+  serviceType String   // "standard", "deep_clean", "apartment", "house", "office", "pos_construcao"
+  
+  // Descrição e detalhes
+  title       String   // "Limpeza Padrão - Apartamento"
+  description String   @db.Text // descrição completa do que inclui
+  
+  // Preço e tempo
+  basePrice   Float    // preço base em R$
+  pricePerHour Float?  // preço por hora se for variável
+  estimatedDuration Int // tempo estimado em minutos
+  
+  // Detalhes do serviço
+  whatIncluded String[] // ["varrer", "mopar", "limpar vidros", "desinfetar"]
+  requirements String[] // ["acesso a água", "tomada 110v", "armário para guardar material"]
+  
+  // Disponibilidade
+  isActive    Boolean  @default(true)
+  weekdaysOnly Boolean @default(false) // apenas dias úteis?
+  minNotice   Int      @default(24) // horas mínimas de aviso
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([cleanerId, serviceType])
+  @@index([cleanerId])
+  @@index([serviceType])
+  @@index([isActive])
+}
+
+// Admin Logs
+model AdminLog {
+  id        String   @id @default(cuid())
+  action    String
+  details   String   // JSON string
+  createdAt DateTime @default(now())
+}
